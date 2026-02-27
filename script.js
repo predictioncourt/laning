@@ -50,6 +50,7 @@ const MAX_STEPS_PER_FRAME = 6;
 let projectiles = [];
 let particles = [];
 let minions = [];
+let pendingAttackTarget = null;
 
 // Yardımcı Fonksiyonlar
 function getDistance(x1, y1, x2, y2) {
@@ -101,6 +102,14 @@ function spawnBurst(x, y, color, count, minSpeed, maxSpeed, minLife, maxLife, mi
         const size = minSize + Math.random() * (maxSize - minSize);
         particles.push(new Particle(x, y, color, speed, angle, life, size, shrink));
     }
+}
+
+function setAttackOrder(target) {
+    pendingAttackTarget = target;
+}
+
+function clearAttackOrder() {
+    pendingAttackTarget = null;
 }
 
 function spawnLineBurst(x1, y1, x2, y2, color, count, minSize, maxSize) {
@@ -865,7 +874,30 @@ function updateStep(dt, timestamp) {
         spawnBurst(enemy.x, enemy.y, '#e74c3c', 30, 2, 6, 1, 2, 4, 8);
     }
 
-    if (!player.isDead) player.update(dt);
+    if (!player.isDead) {
+        if (pendingAttackTarget) {
+            if (!pendingAttackTarget.health || pendingAttackTarget.health <= 0) {
+                clearAttackOrder();
+            } else {
+                const distToTarget = getDistance(player.x, player.y, pendingAttackTarget.x, pendingAttackTarget.y);
+                const inRange = distToTarget <= player.range + pendingAttackTarget.radius;
+                if (inRange) {
+                    const now = performance.now();
+                    if (now - player.lastAttackTime > 1000 / player.attackSpeed) {
+                        projectiles.push(new Projectile(player.x, player.y, pendingAttackTarget, player.damage, player.color, 7, 'basic', player));
+                        player.lastAttackTime = now;
+                        player.targetX = player.x;
+                        player.targetY = player.y;
+                        clearAttackOrder();
+                    }
+                } else {
+                    player.targetX = pendingAttackTarget.x;
+                    player.targetY = pendingAttackTarget.y;
+                }
+            }
+        }
+        player.update(dt);
+    }
 }
 
 function gameLoop(timestamp) {
@@ -920,6 +952,7 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyE') player.useE(mouseX, mouseY);
     if (e.code === 'KeyS') {
         isAttackMode = false;
+        clearAttackOrder();
         player.targetX = player.x;
         player.targetY = player.y;
     }
@@ -936,23 +969,16 @@ window.addEventListener('mousedown', (e) => {
     if (!gameRunning || player.isDead) return;
     if (e.button === 2) {
         isAttackMode = false;
-        player.targetX = e.clientX;
-        player.targetY = e.clientY;
-        
-        // Attack target if right clicked
+        clearAttackOrder();
         let target = null;
         [...minions.filter(m => m.team === 'red'), enemy].forEach(u => {
             if (getDistance(e.clientX, e.clientY, u.x, u.y) < u.radius + 10) target = u;
         });
-
-        if (target && getDistance(player.x, player.y, target.x, target.y) <= player.range + target.radius) {
-            const now = performance.now();
-            if (now - player.lastAttackTime > 1000 / player.attackSpeed) {
-                projectiles.push(new Projectile(player.x, player.y, target, player.damage, player.color, 7, 'basic', player));
-                player.lastAttackTime = now;
-                player.targetX = player.x;
-                player.targetY = player.y;
-            }
+        if (target) {
+            setAttackOrder(target);
+        } else {
+            player.targetX = e.clientX;
+            player.targetY = e.clientY;
         }
     }
 });
@@ -960,6 +986,7 @@ window.addEventListener('mousedown', (e) => {
 window.addEventListener('click', (e) => {
     if (!gameRunning || player.isDead) return;
     if (isAttackMode) {
+        clearAttackOrder();
         let target = null;
         [...minions.filter(m => m.team === 'red'), enemy].forEach(u => {
             if (getDistance(e.clientX, e.clientY, u.x, u.y) < u.radius + 10) target = u;
@@ -977,19 +1004,7 @@ window.addEventListener('click', (e) => {
         }
 
         if (target) {
-            const distToTarget = getDistance(player.x, player.y, target.x, target.y);
-            if (distToTarget <= player.range + target.radius) {
-                const now = performance.now();
-                if (now - player.lastAttackTime > 1000 / player.attackSpeed) {
-                    projectiles.push(new Projectile(player.x, player.y, target, player.damage, player.color, 7, 'basic', player));
-                    player.lastAttackTime = now;
-                    player.targetX = player.x;
-                    player.targetY = player.y;
-                }
-            } else {
-                player.targetX = target.x;
-                player.targetY = target.y;
-            }
+            setAttackOrder(target);
         } else {
             player.targetX = e.clientX;
             player.targetY = e.clientY;
